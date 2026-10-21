@@ -1,4 +1,3 @@
-# 把 GitCode OpenNoesis/vllm 浅克隆镜像到 GitHub hongwei-2026/opannoesis-vllm
 name: mirror-from-gitcode
 
 on:
@@ -7,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "GitCode 分支"
+        description: GitCode branch
         required: false
-        default: "main"
+        default: main
 
 permissions:
   contents: write
@@ -19,27 +18,33 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - name: Mirror shallow clone → GitHub
+      - name: Mirror shallow clone to GitHub
         env:
           GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
-          # 跨仓 push 需要有 repo 权限的 PAT（MIRROR_GITHUB_TOKEN）；否则只能推本仓
-          GH_TOKEN: ${{ secrets.MIRROR_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.MIRROR_GITHUB_TOKEN }}
           REF: ${{ github.event.inputs.ref || 'main' }}
           TARGET: hongwei-2026/opannoesis-vllm
         run: |
           set -euo pipefail
           if [ -z "${GITCODE_TOKEN:-}" ]; then
-            echo "GITCODE_TOKEN secret missing"; exit 1
+            echo "GITCODE_TOKEN secret missing"
+            exit 1
+          fi
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "MIRROR_GITHUB_TOKEN secret missing"
+            exit 1
           fi
           rm -rf work
-          git clone --depth 1 --branch "$REF" \
-            "https://oauth2:${GITCODE_TOKEN}@gitcode.com/OpenNoesis/vllm.git" work \
-            || { git clone --depth 1 "https://oauth2:${GITCODE_TOKEN}@gitcode.com/OpenNoesis/vllm.git" work; git -C work checkout "$REF"; }
+          if ! git clone --depth 1 --branch "$REF" \
+            "https://oauth2:${GITCODE_TOKEN}@gitcode.com/OpenNoesis/vllm.git" work; then
+            git clone --depth 1 \
+              "https://oauth2:${GITCODE_TOKEN}@gitcode.com/OpenNoesis/vllm.git" work
+            git -C work checkout "$REF"
+          fi
           cd work
           echo "source HEAD=$(git rev-parse HEAD)"
           git remote remove origin || true
           git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${TARGET}.git"
-          # 保证有 main
           git branch -M main
           git push -u origin main --force
           echo "mirrored to https://github.com/${TARGET}"

@@ -1,4 +1,3 @@
-# 从 GitCode 拉 OpenNoesis/vllm，在 GitHub 上跑轻量 CI 门禁
 name: vllm-gate
 
 on:
@@ -7,11 +6,11 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "GitCode 分支/tag/commit"
+        description: GitCode branch/tag/commit
         required: false
-        default: "main"
+        default: main
       pr_number:
-        description: "可选：GitCode PR 号（跑完后评论结果）"
+        description: Optional GitCode PR number for result comment
         required: false
         default: ""
 
@@ -27,62 +26,49 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${GITCODE_TOKEN:-}" ]; then
-            echo "GITCODE_TOKEN secret missing"; exit 1
+            echo "GITCODE_TOKEN secret missing"
+            exit 1
           fi
-          git clone --depth 1 --branch "$REF" \
-            "https://oauth2:${GITCODE_TOKEN}@gitcode.com/OpenNoesis/vllm.git" src \
-            || git clone --depth 1 \
-            "https://oauth2:${GITCODE_TOKEN}@gitcode.com/OpenNoesis/vllm.git" src \
-            && git -C src checkout "$REF"
+          if ! git clone --depth 1 --branch "$REF" \
+            "https://oauth2:${GITCODE_TOKEN}@gitcode.com/OpenNoesis/vllm.git" src; then
+            git clone --depth 1 \
+              "https://oauth2:${GITCODE_TOKEN}@gitcode.com/OpenNoesis/vllm.git" src
+            git -C src checkout "$REF"
+          fi
           echo "HEAD=$(git -C src rev-parse --short HEAD)"
-          echo "branch=$(git -C src rev-parse --abbrev-ref HEAD)"
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Compile gate (models + entry)
+      - name: Compile gate
         working-directory: src
         run: |
           set -euo pipefail
           python - <<'PY'
           import compileall, pathlib, sys
-          roots = []
-          for p in [
-              "vllm/model_executor/models",
-              "vllm/entrypoints",
-              "vllm/config",
-          ]:
-              path = pathlib.Path(p)
-              if path.exists():
-                  roots.append(path)
+          candidates = [
+              pathlib.Path("vllm/model_executor/models"),
+              pathlib.Path("vllm/entrypoints"),
+              pathlib.Path("vllm/config"),
+              pathlib.Path("vllm"),
+          ]
+          roots = [p for p in candidates if p.exists()]
+          # prefer specific dirs; if only vllm package, use it
+          preferred = [p for p in roots if str(p) != "vllm"]
+          roots = preferred or roots
           if not roots:
-              # fallback: top-level vllm package
-              if pathlib.Path("vllm").exists():
-                  roots = [pathlib.Path("vllm")]
-              else:
-                  print("no vllm package found", file=sys.stderr)
-                  sys.exit(1)
+              print("no vllm paths found", file=sys.stderr)
+              sys.exit(1)
           ok = True
           for r in roots:
               print(f"compileall {r}")
-              if not compileall.compile_dir(str(r), quiet=1, force=False):
+              if not compileall.compile_dir(str(r), quiet=1):
                   ok = False
           sys.exit(0 if ok else 1)
           PY
 
-      - name: Optional ruff (if configured)
-        working-directory: src
-        continue-on-error: true
-        run: |
-          if [ -f pyproject.toml ] && grep -q '\[tool.ruff' pyproject.toml; then
-            pip install -q ruff
-            ruff check vllm/model_executor/models --output-format=github || true
-          else
-            echo "skip ruff"
-          fi
-
-      - name: Comment GitCode PR (optional)
+      - name: Comment GitCode issue/PR
         if: always() && github.event.inputs.pr_number != ''
         env:
           GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
@@ -91,16 +77,11 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          BODY="### GitHub CI (vllm-gate)\n状态: **${CONCLUSION}**\n详情: ${RUN_URL}"
+          BODY="### GitHub CI (vllm-gate)
+          status: **${CONCLUSION}**
+          details: ${RUN_URL}"
           curl -fsS -X POST \
             -H "Authorization: Bearer ${GITCODE_TOKEN}" \
             -H "Content-Type: application/json" \
-            "https://api.gitcode.com/api/v5/repos/OpenNoesis/vllm/pulls/${PR}/comments" \
-            -d "$(python -c "import json,os; print(json.dumps({'body': os.environ['BODY'].encode().decode('unicode_escape')}))")" \
-            || curl -fsS -X POST \
-            -H "Authorization: Bearer ${GITCODE_TOKEN}" \
-            -H "Content-Type: application/x-www-form-urlencoded" \
             "https://api.gitcode.com/api/v5/repos/OpenNoesis/vllm/issues/${PR}/comments" \
-            --data-urlencode "body=### GitHub CI (vllm-gate)
-状态: **${CONCLUSION}**
-详情: ${RUN_URL}"
+            -d "$(python -c 'import json,os; print(json.dumps({"body": os.environ["BODY"]}))')"
