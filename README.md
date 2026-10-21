@@ -17,7 +17,17 @@ GitCode 流水线未开通时，用 **GitHub Actions** 拉取 `OpenNoesis/vllm` 
 
 ## 工作流
 
-1. **vllm-gate** — 浅克隆 GitCode `OpenNoesis/vllm`，跑 Python 编译门禁（模型目录）
-2. **mirror-from-gitcode** — 浅克隆后 force-push 到 `hongwei-2026/opannoesis-vllm`
+1. **vllm-gate** — **仅触发才跑**（无定时）。浅克隆 GitCode 后做编译门禁，并把日志链接回帖到 Issue  
+2. **mirror-from-gitcode** — 可选镜像同步
 
-手动：Actions → 选 workflow → Run workflow（可填 `ref`，默认 `main`）。
+### 怎么触发 CI
+
+在 GitCode `OpenNoesis/vllm` 对应 Issue 评论单独一行：
+
+```text
+CI
+```
+
+（由 `opannoesis-task-bot` 轮询识别并 dispatch；开始/结束都会贴 Actions 链接）
+
+也可在本仓 Actions → **vllm-gate** → Run workflow，填写 `issue_number` 以便回帖。

@@ -1,16 +1,15 @@
 name: vllm-gate
 
+# 仅手动 / 机器人命令触发，不定时跑
 on:
-  schedule:
-    - cron: "0 */6 * * *"
   workflow_dispatch:
     inputs:
       ref:
         description: GitCode branch/tag/commit
         required: false
         default: main
-      pr_number:
-        description: Optional GitCode PR number for result comment
+      issue_number:
+        description: GitCode issue number to post run link
         required: false
         default: ""
 
@@ -19,6 +18,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      - name: Post start link to GitCode
+        if: github.event.inputs.issue_number != ''
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          ISSUE: ${{ github.event.inputs.issue_number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REF: ${{ github.event.inputs.ref || 'main' }}
+        run: |
+          set -euo pipefail
+          BODY="CI 已开始跑（ref=\`${REF}\`）。
+          实时日志：${RUN_URL}"
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${GITCODE_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "https://api.gitcode.com/api/v5/repos/OpenNoesis/vllm/issues/${ISSUE}/comments" \
+            -d "$(python -c 'import json,os; print(json.dumps({"body": os.environ["BODY"]}))')"
+
       - name: Shallow clone GitCode OpenNoesis/vllm
         env:
           GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
@@ -54,7 +70,6 @@ jobs:
               pathlib.Path("vllm"),
           ]
           roots = [p for p in candidates if p.exists()]
-          # prefer specific dirs; if only vllm package, use it
           preferred = [p for p in roots if str(p) != "vllm"]
           roots = preferred or roots
           if not roots:
@@ -68,20 +83,19 @@ jobs:
           sys.exit(0 if ok else 1)
           PY
 
-      - name: Comment GitCode issue/PR
-        if: always() && github.event.inputs.pr_number != ''
+      - name: Post result link to GitCode
+        if: always() && github.event.inputs.issue_number != ''
         env:
           GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
-          PR: ${{ github.event.inputs.pr_number }}
+          ISSUE: ${{ github.event.inputs.issue_number }}
           CONCLUSION: ${{ job.status }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          BODY="### GitHub CI (vllm-gate)
-          status: **${CONCLUSION}**
-          details: ${RUN_URL}"
+          BODY="CI 结束：**${CONCLUSION}**
+          日志：${RUN_URL}"
           curl -fsS -X POST \
             -H "Authorization: Bearer ${GITCODE_TOKEN}" \
             -H "Content-Type: application/json" \
-            "https://api.gitcode.com/api/v5/repos/OpenNoesis/vllm/issues/${PR}/comments" \
+            "https://api.gitcode.com/api/v5/repos/OpenNoesis/vllm/issues/${ISSUE}/comments" \
             -d "$(python -c 'import json,os; print(json.dumps({"body": os.environ["BODY"]}))')"
