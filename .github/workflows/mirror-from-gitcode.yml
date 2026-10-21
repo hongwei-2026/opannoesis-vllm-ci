@@ -42,9 +42,14 @@ jobs:
             git -C work checkout "$REF"
           fi
           cd work
-          echo "source HEAD=$(git rev-parse HEAD)"
+          SRC_SHA=$(git rev-parse HEAD)
+          echo "source HEAD=${SRC_SHA}"
+          # shallow clone cannot push history objects; flatten to one commit
+          git checkout --orphan mirror-main
+          git add -A
+          git -c user.email='mirror@opannoesis.local' -c user.name='opannoesis-mirror' \
+            commit -m "mirror OpenNoesis/vllm@${SRC_SHA}"
           git remote remove origin || true
           git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${TARGET}.git"
-          git branch -M main
-          git push -u origin main --force
+          git push -u origin mirror-main:main --force
           echo "mirrored to https://github.com/${TARGET}"
